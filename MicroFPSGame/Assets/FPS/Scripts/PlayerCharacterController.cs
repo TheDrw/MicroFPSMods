@@ -34,6 +34,8 @@ public class PlayerCharacterController : MonoBehaviour
     public float sprintSpeedModifier = 2f;
     [Tooltip("Height at which the player dies instantly when falling off the map")]
     public float killHeight = -50f;
+    [Tooltip("Toggle if character can crouch. Not all characters in OW can crouch.")]
+    [SerializeField] bool isAbleToCrouch = true;
 
     [Header("Rotation")]
     [Tooltip("Rotation speed for moving the camera")]
@@ -147,14 +149,16 @@ public class PlayerCharacterController : MonoBehaviour
 
     void Update()
     {
-        // check for Y kill
-        if(!isDead && transform.position.y < killHeight)
-        {
-            m_Health.Kill();
-        }
+        CheckIfCharacterIsInAutoKillZone();
+        HandleCharacterLanding();
+        HandleCharacterCrouch();
+        UpdateCharacterHeight(false);
+        HandleCharacter();
+    }
 
+    private void HandleCharacterLanding()
+    {
         hasJumpedThisFrame = false;
-
         bool wasGrounded = isGrounded;
         GroundCheck();
 
@@ -178,16 +182,32 @@ public class PlayerCharacterController : MonoBehaviour
                 audioSource.PlayOneShot(landSFX);
             }
         }
+    }
 
-        // crouching
-        if (m_InputHandler.GetCrouchInputDown())
+    private void CheckIfCharacterIsInAutoKillZone()
+    {
+        bool isOnAutoKillZone = transform.position.y < killHeight;
+        if (!isDead && isOnAutoKillZone)
         {
-            SetCrouchingState(!isCrouching, false);
+            m_Health.Kill();
         }
+    }
 
-        UpdateCharacterHeight(false);
-
-        HandleCharacterMovement();
+    // crouching only if able to crouch and not in the air. 
+    // you can crouch the instant you land and hold the crouch button like in OW.
+    private void HandleCharacterCrouch()
+    {
+        if (isAbleToCrouch && isGrounded)
+        {
+            if (m_InputHandler.GetCrouchInput() && !isCrouching)
+            {
+                SetCrouchingState(!isCrouching, false);
+            }
+            else if (m_InputHandler.GetCrouchInputReleased() || !m_InputHandler.GetCrouchInput())
+            {
+                SetCrouchingState(false, false);
+            }
+        }
     }
 
     void OnDie()
@@ -211,7 +231,8 @@ public class PlayerCharacterController : MonoBehaviour
         if (Time.time >= m_LastTimeJumped + k_JumpGroundingPreventionTime)
         {
             // if we're grounded, collect info about the ground normal with a downward capsule cast representing our character capsule
-            if (Physics.CapsuleCast(GetCapsuleBottomHemisphere(), GetCapsuleTopHemisphere(m_Controller.height), m_Controller.radius, Vector3.down, out RaycastHit hit, chosenGroundCheckDistance, groundCheckLayers, QueryTriggerInteraction.Ignore))
+            if (Physics.CapsuleCast(GetCapsuleBottomHemisphere(), GetCapsuleTopHemisphere(m_Controller.height), 
+                m_Controller.radius, Vector3.down, out RaycastHit hit, chosenGroundCheckDistance, groundCheckLayers, QueryTriggerInteraction.Ignore))
             {
                 // storing the upward direction for the surface found
                 m_GroundNormal = hit.normal;
@@ -233,119 +254,154 @@ public class PlayerCharacterController : MonoBehaviour
         }
     }
 
-    void HandleCharacterMovement()
+    // I feel like this should be in a class of its own to something like PlayerCharacterMovement. 
+    // I separated the sectioned off parts into functions.
+    // This is doing more than character movement because the camera is involved,
+    // so I am renaming it.
+    void HandleCharacter()
     {
-        // horizontal character rotation
-        {
-            // rotate the transform with the input speed around its local Y axis
-            transform.Rotate(new Vector3(0f, (m_InputHandler.GetLookInputsHorizontal() * rotationSpeed * RotationMultiplier), 0f), Space.Self);
-        }
+        HorizontalCharacterRotation();
+        VerticalCameraRotation();
+        HandleCharacterMovement();
 
-        // vertical camera rotation
-        {
-            // add vertical inputs to the camera's vertical angle
-            m_CameraVerticalAngle += m_InputHandler.GetLookInputsVertical() * rotationSpeed * RotationMultiplier;
+        Vector3 capsuleBottomBeforeMove, capsuleTopBeforeMove;
+        ApplyFinalCalculatedVelocityAsCharacterMovement(out capsuleBottomBeforeMove, out capsuleTopBeforeMove);
+        DetectObstructionsToAdjustVelocityAccordingly(capsuleBottomBeforeMove, capsuleTopBeforeMove);
+    }
 
-            // limit the camera's vertical angle to min/max
-            m_CameraVerticalAngle = Mathf.Clamp(m_CameraVerticalAngle, -89f, 89f);
-
-            // apply the vertical angle as a local rotation to the camera transform along its right axis (makes it pivot up and down)
-            playerCamera.transform.localEulerAngles = new Vector3(m_CameraVerticalAngle, 0, 0);
-        }
-
-        // character movement handling
-        bool isSprinting = m_InputHandler.GetSprintInputHeld();
-        {
-            if (isSprinting)
-            {
-                isSprinting = SetCrouchingState(false, false);
-            }
-
-            float speedModifier = isSprinting ? sprintSpeedModifier : 1f;
-
-            // converts move input to a worldspace vector based on our character's transform orientation
-            Vector3 worldspaceMoveInput = transform.TransformVector(m_InputHandler.GetMoveInput());
-
-            // handle grounded movement
-            if (isGrounded)
-            {
-                // calculate the desired velocity from inputs, max speed, and current slope
-                Vector3 targetVelocity = worldspaceMoveInput * maxSpeedOnGround * speedModifier;
-                // reduce speed if crouching by crouch speed ratio
-                if (isCrouching)
-                    targetVelocity *= maxSpeedCrouchedRatio;
-                targetVelocity = GetDirectionReorientedOnSlope(targetVelocity.normalized, m_GroundNormal) * targetVelocity.magnitude;
-
-                // smoothly interpolate between our current velocity and the target velocity based on acceleration speed
-                characterVelocity = Vector3.Lerp(characterVelocity, targetVelocity, movementSharpnessOnGround * Time.deltaTime);
-
-                // jumping
-                if (isGrounded && m_InputHandler.GetJumpInputDown())
-                {
-                    // force the crouch state to false
-                    if (SetCrouchingState(false, false))
-                    {
-                        // start by canceling out the vertical component of our velocity
-                        characterVelocity = new Vector3(characterVelocity.x, 0f, characterVelocity.z);
-
-                        // then, add the jumpSpeed value upwards
-                        characterVelocity += Vector3.up * jumpForce;
-
-                        // play sound
-                        audioSource.PlayOneShot(jumpSFX);
-
-                        // remember last time we jumped because we need to prevent snapping to ground for a short time
-                        m_LastTimeJumped = Time.time;
-                        hasJumpedThisFrame = true;
-
-                        // Force grounding to false
-                        isGrounded = false;
-                        m_GroundNormal = Vector3.up;
-                    }
-                }
-
-                // footsteps sound
-                float chosenFootstepSFXFrequency = (isSprinting ? footstepSFXFrequencyWhileSprinting : footstepSFXFrequency);
-                if (m_footstepDistanceCounter >= 1f / chosenFootstepSFXFrequency)
-                {
-                    m_footstepDistanceCounter = 0f;
-                    audioSource.PlayOneShot(footstepSFX);
-                }
-
-                // keep track of distance traveled for footsteps sound
-                m_footstepDistanceCounter += characterVelocity.magnitude * Time.deltaTime;
-            }
-            // handle air movement
-            else
-            {
-                // add air acceleration
-                characterVelocity += worldspaceMoveInput * accelerationSpeedInAir * Time.deltaTime;
-
-                // limit air speed to a maximum, but only horizontally
-                float verticalVelocity = characterVelocity.y;
-                Vector3 horizontalVelocity = Vector3.ProjectOnPlane(characterVelocity, Vector3.up);
-                horizontalVelocity = Vector3.ClampMagnitude(horizontalVelocity, maxSpeedInAir * speedModifier);
-                characterVelocity = horizontalVelocity + (Vector3.up * verticalVelocity);
-
-                // apply the gravity to the velocity
-                characterVelocity += Vector3.down * gravityDownForce * Time.deltaTime;
-            }
-        }
-
-        // apply the final calculated velocity value as a character movement
-        Vector3 capsuleBottomBeforeMove = GetCapsuleBottomHemisphere();
-        Vector3 capsuleTopBeforeMove = GetCapsuleTopHemisphere(m_Controller.height);
-        m_Controller.Move(characterVelocity * Time.deltaTime);
-
-        // detect obstructions to adjust velocity accordingly
+    private void DetectObstructionsToAdjustVelocityAccordingly(Vector3 capsuleBottomBeforeMove, Vector3 capsuleTopBeforeMove)
+    {
         m_LatestImpactSpeed = Vector3.zero;
-        if (Physics.CapsuleCast(capsuleBottomBeforeMove, capsuleTopBeforeMove, m_Controller.radius, characterVelocity.normalized, out RaycastHit hit, characterVelocity.magnitude * Time.deltaTime, -1, QueryTriggerInteraction.Ignore))
+        if (Physics.CapsuleCast(capsuleBottomBeforeMove, capsuleTopBeforeMove, m_Controller.radius, characterVelocity.normalized, 
+            out RaycastHit hit, characterVelocity.magnitude * Time.deltaTime, -1, QueryTriggerInteraction.Ignore))
         {
             // We remember the last impact speed because the fall damage logic might need it
             m_LatestImpactSpeed = characterVelocity;
 
             characterVelocity = Vector3.ProjectOnPlane(characterVelocity, hit.normal);
         }
+    }
+
+    private void ApplyFinalCalculatedVelocityAsCharacterMovement(out Vector3 capsuleBottomBeforeMove, out Vector3 capsuleTopBeforeMove)
+    {
+        capsuleBottomBeforeMove = GetCapsuleBottomHemisphere();
+        capsuleTopBeforeMove = GetCapsuleTopHemisphere(m_Controller.height);
+        m_Controller.Move(characterVelocity * Time.deltaTime);
+    }
+
+    private void HorizontalCharacterRotation()
+    {
+        // rotate the transform with the input speed around its local Y axis
+        transform.Rotate(new Vector3(0f, (m_InputHandler.GetLookInputsHorizontal() * rotationSpeed * RotationMultiplier), 0f), Space.Self);
+    }
+
+    // Shouldn't changes to things that handle the camera or the camera itself be done during late update?
+    private void VerticalCameraRotation()
+    {
+        // add vertical inputs to the camera's vertical angle
+        m_CameraVerticalAngle += m_InputHandler.GetLookInputsVertical() * rotationSpeed * RotationMultiplier;
+
+        // limit the camera's vertical angle to min/max
+        m_CameraVerticalAngle = Mathf.Clamp(m_CameraVerticalAngle, -89f, 89f);
+
+        // apply the vertical angle as a local rotation to the camera transform along its right axis (makes it pivot up and down)
+        playerCamera.transform.localEulerAngles = new Vector3(m_CameraVerticalAngle, 0, 0);
+    }
+
+    private void HandleCharacterMovement()
+    {
+        bool isSprinting = m_InputHandler.GetSprintInputHeld();
+        if (isSprinting)
+        {
+            isSprinting = SetCrouchingState(false, false);
+        }
+
+        float speedModifier = isSprinting ? sprintSpeedModifier : 1f;
+
+        // converts move input to a worldspace vector based on our character's transform orientation
+        Vector3 worldspaceMoveInput = transform.TransformVector(m_InputHandler.GetMoveInput());
+
+        if (isGrounded)
+        {
+            HandleCharacterGroundedMovement(isSprinting, speedModifier, worldspaceMoveInput);
+        }
+        else
+        {
+            HandleCharacterAirMovement(speedModifier, worldspaceMoveInput);
+        }
+    }
+
+    private void HandleCharacterGroundedMovement(bool isSprinting, float speedModifier, Vector3 worldspaceMoveInput)
+    {
+        // calculate the desired velocity from inputs, max speed, and current slope
+        Vector3 targetVelocity = worldspaceMoveInput * maxSpeedOnGround * speedModifier;
+        // reduce speed if crouching by crouch speed ratio
+        if (isCrouching)
+            targetVelocity *= maxSpeedCrouchedRatio;
+
+        targetVelocity = GetDirectionReorientedOnSlope(targetVelocity.normalized, m_GroundNormal) * targetVelocity.magnitude;
+
+        // smoothly interpolate between our current velocity and the target velocity based on acceleration speed
+        characterVelocity = Vector3.Lerp(characterVelocity, targetVelocity, movementSharpnessOnGround * Time.deltaTime);
+
+        // jumping
+        if (isGrounded && m_InputHandler.GetJumpInputDown())
+        {
+            HandleCharacterJumpWhenGrounded();
+        }
+
+        // footsteps sound
+        float chosenFootstepSFXFrequency = (isSprinting ? footstepSFXFrequencyWhileSprinting : footstepSFXFrequency);
+        if (m_footstepDistanceCounter >= 1f / chosenFootstepSFXFrequency)
+        {
+            m_footstepDistanceCounter = 0f;
+
+            // We want silent footsteps when crouch walking like in OVerwatch
+            if (!isCrouching)
+                audioSource.PlayOneShot(footstepSFX);
+        }
+
+        // keep track of distance traveled for footsteps sound
+        m_footstepDistanceCounter += characterVelocity.magnitude * Time.deltaTime;
+    }
+
+    private void HandleCharacterJumpWhenGrounded()
+    {
+        // force the crouch state to false
+        if (SetCrouchingState(false, false))
+        {
+            // start by canceling out the vertical component of our velocity
+            characterVelocity = new Vector3(characterVelocity.x, 0f, characterVelocity.z);
+
+            // then, add the jumpSpeed value upwards
+            characterVelocity += Vector3.up * jumpForce;
+
+            // play sound
+            audioSource.PlayOneShot(jumpSFX);
+
+            // remember last time we jumped because we need to prevent snapping to ground for a short time
+            m_LastTimeJumped = Time.time;
+            hasJumpedThisFrame = true;
+
+            // Force grounding to false
+            isGrounded = false;
+            m_GroundNormal = Vector3.up;
+        }
+    }
+
+    private void HandleCharacterAirMovement(float speedModifier, Vector3 worldspaceMoveInput)
+    {
+        // add air acceleration
+        characterVelocity += worldspaceMoveInput * accelerationSpeedInAir * Time.deltaTime;
+
+        // limit air speed to a maximum, but only horizontally
+        float verticalVelocity = characterVelocity.y;
+        Vector3 horizontalVelocity = Vector3.ProjectOnPlane(characterVelocity, Vector3.up);
+        horizontalVelocity = Vector3.ClampMagnitude(horizontalVelocity, maxSpeedInAir * speedModifier);
+        characterVelocity = horizontalVelocity + (Vector3.up * verticalVelocity);
+
+        // apply the gravity to the velocity
+        characterVelocity += Vector3.down * gravityDownForce * Time.deltaTime;
     }
 
     // Returns true if the slope angle represented by the given normal is under the slope angle limit of the character controller
@@ -404,7 +460,6 @@ public class PlayerCharacterController : MonoBehaviour
         }
         else
         {
-            // Detect obstructions
             if (!ignoreObstructions)
             {
                 Collider[] standingOverlaps = Physics.OverlapCapsule(
