@@ -2,18 +2,35 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+/// <summary>
+/// 
+/// --- blink notes ---
+/// no invul during blink
+/// blinks through enemies and friends
+/// can blink onto things at eye level
+/// when on jump pads, blink cancels physics applied
+/// blink keeps momentum of direction blink when in air
+/// able to blink onto stairs/inclines and keeps same traveled distance as when on flat surface. ~45 degree surfaces
+/// can blink over small obstructions that are below eye level
+/// at a certain height, blink doesn't "teleport" onto surface but hang in the air then land. maybe about +3m
+/// can blink onto platforms/spots that aren't connected
+/// can not blink out of traps ( ex: junkrat ) not sure if will implement that
+/// can blink as fast as pressing down key. no noticeable recovery frames
+/// </summary>
 public class Tracer : MonoBehaviour
 {
     [SerializeField] Camera weaponCamera;
     [SerializeField] GameObject blinkDistanceVisual;
 
-    float blinkDistance = 7.5f;
-    Vector3 heightOffset = new Vector3(0f, 1.5f, 0f);
-    Vector3 blinkDirection;
+    RaycastHit hit;
     CharacterController m_Controller;
     PlayerCharacterController m_PlayerController;
-    Vector3 blinkStartingPos;
-    RaycastHit hit;
+
+    float blinkDistance = 7.5f;
+    Vector3 blinkDirection; // direction changes on the 
+    Vector3 blinkStartingPosition;
+    Vector3 blinkDirectionOffsetFromCharacter; // so the raycast doesn't collide with ourself
+    Vector3 blinkHeightRestrictionOffset = new Vector3(0f, 1.5f, 0f);
 
     private void Start()
     {
@@ -23,23 +40,29 @@ public class Tracer : MonoBehaviour
         m_PlayerController = GetComponent<PlayerCharacterController>();
         DebugUtility.HandleErrorIfNullGetComponent<PlayerCharacterController, Tracer>(m_Controller, this, gameObject);
 
-        blinkStartingPos = blinkDistanceVisual.transform.position;
+        blinkStartingPosition = blinkDistanceVisual.transform.position;
     }
 
     private void Update()
     {
-        Vector3 startPosition = transform.position + heightOffset + transform.forward * m_Controller.radius;
-        blinkDirection = transform.forward;
+        blinkDirection = transform.forward; // temp fwd for now
+        blinkDirectionOffsetFromCharacter = blinkDirection * m_Controller.radius;
+        Vector3 startPosition = transform.position + blinkHeightRestrictionOffset + blinkDirectionOffsetFromCharacter;
 
         Debug.DrawRay(startPosition, blinkDirection * blinkDistance, Color.red);
         if(Physics.Raycast(startPosition, blinkDirection, out hit, blinkDistance))
         {
-            print(hit.point);
+            //print(hit.point);
             blinkDistanceVisual.transform.position = hit.point;
         }
         else
         {
-            blinkDistanceVisual.transform.position = transform.position + blinkDirection * blinkDistance + heightOffset;
+            blinkDistanceVisual.transform.position = transform.position + blinkDirection * blinkDistance + blinkHeightRestrictionOffset;
         }
+    }
+
+    void Blink(Vector3 direction)
+    {
+
     }
 }

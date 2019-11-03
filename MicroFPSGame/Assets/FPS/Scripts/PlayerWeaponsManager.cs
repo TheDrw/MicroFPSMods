@@ -281,7 +281,8 @@ public class PlayerWeaponsManager : MonoBehaviour
             float characterMovementFactor = 0f;
             if (m_PlayerCharacterController.isGrounded)
             {
-                characterMovementFactor = Mathf.Clamp01(playerCharacterVelocity.magnitude / (m_PlayerCharacterController.maxSpeedOnGround * m_PlayerCharacterController.sprintSpeedModifier));
+                characterMovementFactor = Mathf.Clamp01(playerCharacterVelocity.magnitude / 
+                    (m_PlayerCharacterController.maxSpeedOnGround * m_PlayerCharacterController.sprintSpeedModifier));
             }
             m_WeaponBobFactor = Mathf.Lerp(m_WeaponBobFactor, characterMovementFactor, bobSharpness * Time.deltaTime);
 

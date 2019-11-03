@@ -203,7 +203,8 @@ public class PlayerCharacterController : MonoBehaviour
             {
                 SetCrouchingState(!isCrouching, false);
             }
-            else if (m_InputHandler.GetCrouchInputReleased() || !m_InputHandler.GetCrouchInput())
+            else if (isCrouching && 
+                (m_InputHandler.GetCrouchInputReleased() || !m_InputHandler.GetCrouchInput()))
             {
                 SetCrouchingState(false, false);
             }
@@ -257,7 +258,7 @@ public class PlayerCharacterController : MonoBehaviour
     // I feel like this should be in a class of its own to something like PlayerCharacterMovement. 
     // I separated the sectioned off parts into functions.
     // This is doing more than character movement because the camera is involved,
-    // so I am renaming it.
+    // so I renamed it.
     void HandleCharacter()
     {
         HorizontalCharacterRotation();
