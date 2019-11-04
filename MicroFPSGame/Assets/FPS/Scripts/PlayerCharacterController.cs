@@ -489,4 +489,9 @@ public class PlayerCharacterController : MonoBehaviour
         isCrouching = crouched;
         return true;
     }
+
+    public void ResetCharacterVelocity()
+    {
+        characterVelocity = Vector3.zero;
+    }
 }

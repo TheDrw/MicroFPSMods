@@ -1,5 +1,14 @@
 ﻿using UnityEngine;
 
+/// TODO 
+/// i don't understand the need for this class. 
+/// i feel like this should be an interface.
+/// you can make this an IDamageable interface, so you can implement the IDamageable interface on the health script.
+/// so you can make things like a box have a health script and it will be IDamageable.
+/// public interface IDamageable { Damage();}
+/// then when you shoot/hit it, just do something like if(GetComponent<IDamageable>().Damage()) do stuff
+/// just an example
+
 public class Damageable : MonoBehaviour
 {
     [Tooltip("Multiplier to apply to the received damage")]
